@@ -7,6 +7,8 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.HttpHeaders;
 import io.vertx.core.http.HttpServerResponse;
+import io.vertx.core.impl.logging.Logger;
+import io.vertx.core.impl.logging.LoggerFactory;
 import io.vertx.core.streams.Pipe;
 import io.vertx.core.streams.ReadStream;
 import io.vertx.httpproxy.Body;
@@ -20,6 +22,8 @@ import java.util.List;
 import java.util.function.Function;
 
 class ProxyResponseImpl implements ProxyResponse {
+
+  private static final Logger log = LoggerFactory.getLogger(ProxyResponseImpl.class);
 
   private final ProxyRequestImpl request;
   private final HttpServerResponse edgeResponse;
@@ -50,6 +54,7 @@ class ProxyResponseImpl implements ProxyResponse {
         contentLength = Long.parseLong(contentLengthHeader);
       } catch (NumberFormatException e) {
         // Ignore ???
+        log.debug(e);
       }
     }
 
@@ -155,7 +160,7 @@ class ProxyResponseImpl implements ProxyResponse {
     try {
       edgeResponse.putHeader("date", ParseUtils.formatHttpDate(date));
     } catch (Exception e) {
-      e.printStackTrace();
+      log.warn(e);
     }
 
     // Warning header
@@ -189,7 +194,7 @@ class ProxyResponseImpl implements ProxyResponse {
 
     //
     if (body == null) {
-      edgeResponse.end();
+      edgeResponse.end(completionHandler);
       return;
     }
 
