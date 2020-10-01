@@ -37,6 +37,9 @@ public interface HttpProxy extends Handler<HttpServerRequest> {
   @Fluent
   HttpProxy exceptionHandler(@Nullable Handler<Throwable> handler);
 
+  @Fluent
+  HttpProxy setUseCache(boolean useCache);
+
   void handle(HttpServerRequest request);
 
 }

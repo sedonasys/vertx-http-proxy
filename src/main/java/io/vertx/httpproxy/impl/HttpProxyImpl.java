@@ -40,6 +40,7 @@ public class HttpProxyImpl implements HttpProxy {
   private final HttpClient client;
   private Function<HttpServerRequest, Future<SocketAddress>> selector = req -> Future.failedFuture("No target available");
   private Handler<Throwable> exceptionHandler;
+  private boolean useCache = true;
   private final Map<String, Resource> cache = new HashMap<>();
 
   public HttpProxyImpl(HttpClient client) {
@@ -55,6 +56,12 @@ public class HttpProxyImpl implements HttpProxy {
   @Override
   public HttpProxy exceptionHandler(Handler<Throwable> handler) {
     exceptionHandler = handler;
+    return this;
+  }
+
+  @Override
+  public HttpProxy setUseCache(boolean useCache) {
+    this.useCache = useCache;
     return this;
   }
 
@@ -99,14 +106,16 @@ public class HttpProxyImpl implements HttpProxy {
       return;
     }
 
-    // Handle from cache
-    HttpMethod method = frontRequest.method();
-    if (method == HttpMethod.GET || method == HttpMethod.HEAD) {
-      String cacheKey = proxyRequest.absoluteURI();
-      Resource resource = cache.computeIfPresent(cacheKey, CACHE_GET_AND_VALIDATE);
-      if (resource != null) {
-        if (tryHandleProxyRequestFromCache(proxyRequest, frontRequest, resource)) {
-          return;
+    if (useCache) {
+      // Handle from cache
+      HttpMethod method = frontRequest.method();
+      if (method == HttpMethod.GET || method == HttpMethod.HEAD) {
+        String cacheKey = proxyRequest.absoluteURI();
+        Resource resource = cache.computeIfPresent(cacheKey, CACHE_GET_AND_VALIDATE);
+        if (resource != null) {
+          if (tryHandleProxyRequestFromCache(proxyRequest, frontRequest, resource)) {
+            return;
+          }
         }
       }
     }
