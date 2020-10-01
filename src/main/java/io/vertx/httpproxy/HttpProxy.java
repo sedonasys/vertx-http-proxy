@@ -1,6 +1,7 @@
 package io.vertx.httpproxy;
 
 import io.vertx.codegen.annotations.Fluent;
+import io.vertx.codegen.annotations.Nullable;
 import io.vertx.codegen.annotations.VertxGen;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -32,6 +33,9 @@ public interface HttpProxy extends Handler<HttpServerRequest> {
 
   @Fluent
   HttpProxy selector(Function<HttpServerRequest, Future<SocketAddress>> selector);
+
+  @Fluent
+  HttpProxy exceptionHandler(@Nullable Handler<Throwable> handler);
 
   void handle(HttpServerRequest request);
 

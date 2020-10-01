@@ -4,6 +4,7 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
+import io.vertx.core.VertxException;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientRequest;
@@ -13,6 +14,8 @@ import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpVersion;
 import io.vertx.core.http.RequestOptions;
 import io.vertx.core.net.SocketAddress;
+import io.vertx.core.impl.logging.Logger;
+import io.vertx.core.impl.logging.LoggerFactory;
 import io.vertx.httpproxy.Body;
 import io.vertx.httpproxy.HttpProxy;
 import io.vertx.httpproxy.ProxyRequest;
@@ -26,6 +29,8 @@ import java.util.function.Function;
 
 public class HttpProxyImpl implements HttpProxy {
 
+  private static final Logger log = LoggerFactory.getLogger(HttpProxyImpl.class);
+
   private static final BiFunction<String, Resource, Resource> CACHE_GET_AND_VALIDATE = (key, resource) -> {
     long now = System.currentTimeMillis();
     long val = resource.timestamp + resource.maxAge;
@@ -34,6 +39,7 @@ public class HttpProxyImpl implements HttpProxy {
 
   private final HttpClient client;
   private Function<HttpServerRequest, Future<SocketAddress>> selector = req -> Future.failedFuture("No target available");
+  private Handler<Throwable> exceptionHandler;
   private final Map<String, Resource> cache = new HashMap<>();
 
   public HttpProxyImpl(HttpClient client) {
@@ -43,6 +49,12 @@ public class HttpProxyImpl implements HttpProxy {
   @Override
   public HttpProxy selector(Function<HttpServerRequest, Future<SocketAddress>> selector) {
     this.selector = selector;
+    return this;
+  }
+
+  @Override
+  public HttpProxy exceptionHandler(Handler<Throwable> handler) {
+    exceptionHandler = handler;
     return this;
   }
 
@@ -73,7 +85,7 @@ public class HttpProxyImpl implements HttpProxy {
       .setStatusCode(sc)
       .putHeader(HttpHeaders.CONTENT_LENGTH, "0")
       .setBody(null)
-      .send(ar -> {});
+      .send(this::handleFailedResult);
 
   }
 
@@ -104,9 +116,9 @@ public class HttpProxyImpl implements HttpProxy {
   private void handleProxyRequestAndProxyResponse(ProxyRequest proxyRequest, HttpServerRequest frontRequest) {
     handleProxyRequest(proxyRequest, frontRequest, ar -> {
       if (ar.succeeded()) {
-        handleProxyResponse(ar.result(), ar2 -> {});
+        handleProxyResponse(ar.result(), this::handleFailedResult);
       } else {
-        // TODO ???
+        handleException(ar.cause());
       }
     });
   }
@@ -147,7 +159,8 @@ public class HttpProxyImpl implements HttpProxy {
     if (chunked == null) {
       // response.request().release(); // Is it needed ???
       end(response.request(), 501);
-      completionHandler.handle(Future.failedFuture("TODO"));
+      completionHandler.handle(Future.failedFuture(new VertxException(
+        "Not implemented transfer-encoding " + response.headers().get("transfer-encoding"))));
       return;
     }
 
@@ -164,7 +177,7 @@ public class HttpProxyImpl implements HttpProxy {
             response.setBody(Body.body(content));
             continueHandleResponse(response, completionHandler);
           } else {
-            System.out.println("Not implemented");
+            completionHandler.handle(ar);
           }
         });
         return;
@@ -228,7 +241,7 @@ public class HttpProxyImpl implements HttpProxy {
                 int sc = proxyResp.getStatusCode();
                 switch (sc) {
                   case 200:
-                    handleProxyResponse(proxyResp, ar2 -> {});
+                    handleProxyResponse(proxyResp, this::handleFailedResult);
                     break;
                   case 304:
                     // Warning: this relies on the fact that HttpServerRequest will not send a body for HEAD
@@ -236,11 +249,11 @@ public class HttpProxyImpl implements HttpProxy {
                     resource.sendTo(proxyRequest.response());
                     break;
                   default:
-                    System.out.println("Not implemented");
+                    log.info("Not implemented");
                     break;
                 }
               } else {
-                System.out.println("Not implemented");
+                handleException(ar.cause());
               }
             });
             return true;
@@ -256,12 +269,24 @@ public class HttpProxyImpl implements HttpProxy {
     if ((frontRequest.method() == HttpMethod.GET || frontRequest.method() == HttpMethod.HEAD) && ifModifiedSinceHeader != null && resource.lastModified != null) {
       Date ifModifiedSince = ParseUtils.parseHeaderDate(ifModifiedSinceHeader);
       if (resource.lastModified.getTime() <= ifModifiedSince.getTime()) {
-        frontRequest.response().setStatusCode(304).end();
+        frontRequest.response().setStatusCode(304).end(this::handleFailedResult);
         return true;
       }
     }
 
     resource.sendTo(proxyRequest.response());
     return true;
+  }
+
+  private void handleFailedResult(AsyncResult<?> ar) {
+    if (ar.failed()) {
+      handleException(ar.cause());
+    }
+  }
+
+  private void handleException(Throwable t) {
+    if (exceptionHandler != null) {
+      exceptionHandler.handle(t);
+    }
   }
 }
